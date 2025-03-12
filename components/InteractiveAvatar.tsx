@@ -92,7 +92,7 @@ export default function InteractiveAvatar() {
         setText(data.transcript);
         setTimeout(() => {
           handleSpeak(data.transcript);
-        }, 100); // Add slight delay to ensure React state updates
+        }, 50); // Add slight delay to ensure React state updates
       } else {
         console.error("❌ Error processing audio:", data.error);
         setDebug("Error processing audio");
