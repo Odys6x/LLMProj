@@ -33,6 +33,7 @@ export default function InteractiveAvatar() {
   const [knowledgeId, setKnowledgeId] = useState<string>("");
   const [avatarId, setAvatarId] = useState<string>("");
   const [language, setLanguage] = useState<string>('en');
+  const [isRecording, setIsRecording] = useState(false);
 
   const [data, setData] = useState<StartAvatarResponse>();
   const [text, setText] = useState<string>("");
@@ -40,6 +41,9 @@ export default function InteractiveAvatar() {
   const avatar = useRef<StreamingAvatar | null>(null);
   const [chatMode, setChatMode] = useState("text_mode");
   const [isUserTalking, setIsUserTalking] = useState(false);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   async function fetchAccessToken() {
     try {
@@ -57,6 +61,81 @@ export default function InteractiveAvatar() {
 
     return "";
   }
+
+  async function processRecordedAudio(audioBlob: Blob) {
+    const reader = new FileReader();
+    reader.readAsDataURL(audioBlob);
+    reader.onloadend = async () => {
+      const base64Audio = reader.result;
+  
+      console.log("📤 Sending recorded audio to backend...");
+  
+      const response = await fetch("/api/audio-to-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio: base64Audio }),
+      });
+  
+      const data = await response.json();
+  
+      if (response.ok) {
+        console.log("🎤 Transcription received:", data.transcript);
+  
+        if (!data.transcript.trim()) {
+          console.log("🚫 Ignoring empty transcript.");
+          return; // Ignore if no speech was detected
+        }
+  
+        setDebug(`User said: ${data.transcript}`);
+  
+        // ✅ Ensure `handleSpeak()` is called AFTER `text` updates
+        setText(data.transcript);
+        setTimeout(() => {
+          handleSpeak(data.transcript);
+        }, 100); // Add slight delay to ensure React state updates
+      } else {
+        console.error("❌ Error processing audio:", data.error);
+        setDebug("Error processing audio");
+      }
+    };
+  }
+  
+  
+  function handleVoiceRecording() {
+    if (!isRecording) {
+      // Start recording
+      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+  
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+  
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
+  
+          // ✅ Process the recorded audio
+          processRecordedAudio(audioBlob);
+        };
+  
+        mediaRecorder.start();
+        setIsRecording(true);
+        console.log("🎤 Recording started...");
+      }).catch((err) => console.error("Error accessing microphone:", err));
+    } else {
+      // Stop recording
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop();
+        setIsRecording(false);
+        console.log("🛑 Recording stopped.");
+      }
+    }
+  }
+  
 
   async function startSession() {
     setIsLoadingSession(true);
@@ -79,14 +158,7 @@ export default function InteractiveAvatar() {
       console.log(">>>>> Stream ready:", event.detail);
       setStream(event.detail);
     });
-    avatar.current?.on(StreamingEvents.USER_START, (event) => {
-      console.log(">>>>> User started talking:", event);
-      setIsUserTalking(true);
-    });
-    avatar.current?.on(StreamingEvents.USER_STOP, (event) => {
-      console.log(">>>>> User stopped talking:", event);
-      setIsUserTalking(false);
-    });
+    
     try {
       const res = await avatar.current.createStartAvatar({
         quality: AvatarQuality.High,
@@ -108,9 +180,6 @@ export default function InteractiveAvatar() {
 
       setData(res);
       // default to voice mode
-      await avatar.current?.startVoiceChat({
-        useSilencePrompt: false
-      });
       setChatMode("voice_mode");
     } catch (error) {
       console.error("Error starting avatar session:", error);
@@ -120,59 +189,32 @@ export default function InteractiveAvatar() {
   }
     
 
-  // async function handleSpeak() {
-  //   setIsLoadingRepeat(true);
+  async function handleSpeak(message?: string) {
+    const inputText = message || text; // ✅ Use the latest transcript
   
-  //   try {
-  //     // Send user input to the OpenAI API
-  //     const response = await fetch("/api/chatgpt", {
-  //       method: "POST",
-  //       headers: {
-  //         "Content-Type": "application/json",
-  //       },
-  //       body: JSON.stringify({ message: text }), // Pass user input as "message"
-  //     });
+    if (!inputText.trim()) {
+      console.log("🚫 Ignoring empty input.");
+      return; // Ignore if no actual user input
+    }
   
-  //     const data = await response.json();
-  
-  //     if (response.ok) {
-  //       const reply = data.reply;
-  
-  //       await avatar.current?.speak({
-  //         text: reply,
-  //         taskType: TaskType.REPEAT,
-  //         taskMode: TaskMode.SYNC,
-  //       });
-  
-  //       setDebug(`Avatar said: ${reply}`);
-  //     } else {
-  //       setDebug(data.error || "Failed to get response from OpenAI");
-  //     }
-  //   } catch (error) {
-  //     console.error("Error fetching OpenAI response:", error);
-  //     setDebug("Error fetching OpenAI response");
-  //   } finally {
-  //     setIsLoadingRepeat(false);
-  //   }
-  // }
-
-  async function handleSpeak() {
     setIsLoadingRepeat(true);
   
     try {
-      // Send user input to AWS API route
-      const response = await fetch("/api/AWS", {
+      console.log("📤 Sending text to OpenAI:", inputText);
+  
+      const response = await fetch("/api/chatgpt", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt: text }), // Pass user input as "prompt"
+        body: JSON.stringify({ message: inputText }), // ✅ Use the latest transcript
       });
   
       const data = await response.json();
   
       if (response.ok) {
-        const reply = data.response;
+        const reply = data.reply;
+        console.log("🗣 Bot's Response:", reply);
   
         await avatar.current?.speak({
           text: reply,
@@ -182,11 +224,11 @@ export default function InteractiveAvatar() {
   
         setDebug(`Avatar said: ${reply}`);
       } else {
-        setDebug(data.error || "Failed to get response from AWS Lambda");
+        setDebug(data.error || "Failed to get response from OpenAI");
       }
     } catch (error) {
-      console.error("Error fetching AWS Lambda response:", error);
-      setDebug("Error fetching AWS Lambda response");
+      console.error("❌ Error fetching OpenAI response:", error);
+      setDebug("Error fetching OpenAI response");
     } finally {
       setIsLoadingRepeat(false);
     }
@@ -216,21 +258,10 @@ export default function InteractiveAvatar() {
       return;
     }
     if (v === "text_mode") {
-      avatar.current?.closeVoiceChat();
-    } else {
-      await avatar.current?.startVoiceChat();
+
     }
     setChatMode(v);
   });
-
-  const previousText = usePrevious(text);
-  useEffect(() => {
-    if (!previousText && text) {
-      avatar.current?.startListening();
-    } else if (previousText && !text) {
-      avatar?.current?.stopListening();
-    }
-  }, [text, previousText]);
 
   useEffect(() => {
     return () => {
@@ -346,14 +377,17 @@ export default function InteractiveAvatar() {
             </div>
           ) : (
             <div className="w-full text-center">
-              <Button
-                isDisabled={!isUserTalking}
-                className="bg-gradient-to-tr from-indigo-500 to-indigo-300 text-white"
-                size="md"
-                variant="shadow"
-              >
-                {isUserTalking ? "Listening" : "Voice chat"}
-              </Button>
+                <Button
+                  className={`bg-gradient-to-tr ${
+                    isRecording ? "from-red-500 to-red-300" : "from-indigo-500 to-indigo-300"
+                  } text-white rounded-lg`}
+                  size="md"
+                  variant="shadow"
+                  onClick={handleVoiceRecording}
+                >
+                  {isRecording ? "Stop Recording" : "Start Recording"}
+                </Button>
+
             </div>
           )}
         </CardFooter>
