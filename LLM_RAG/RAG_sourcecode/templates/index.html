@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat with RAG Model</title>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f7f7f7;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .chat-container {
+            width: 60%;
+            max-width: 800px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+        }
+        .chat-box {
+            width: 100%;
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 5px;
+            background: #f9f9f9;
+            margin-bottom: 20px;
+        }
+        .chat-box .message {
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        .chat-box .message.user {
+            text-align: right;
+            color: #333;
+        }
+        .chat-box .message.bot {
+            text-align: left;
+            color: #333;
+        }
+        .input-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .input-container input {
+            padding: 10px;
+            font-size: 16px;
+            width: calc(100% - 110px);
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-right: 10px;
+        }
+        .input-container button {
+            padding: 10px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            background-color: #007BFF;
+            color: white;
+            cursor: pointer;
+            width: 100px;
+        }
+        .input-container button:hover {
+            background-color: #0056b3;
+        }
+        .name-input {
+            margin-bottom: 20px;
+        }
+        .name-input input {
+            padding: 10px;
+            font-size: 16px;
+            width: calc(100% - 22px);
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="chat-container">
+        <h1 style="text-align: center; font-weight: 500;">Chat with RAG Model</h1>
+        <div class="name-input">
+            <input type="text" id="user-name" placeholder="Enter your name...">
+        </div>
+        <div class="chat-box" id="chat-box"></div>
+        <div class="input-container">
+            <input type="text" id="user-input" placeholder="Type your message...">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        function sendMessage() {
+            const input = document.getElementById('user-input');
+            const nameInput = document.getElementById('user-name');
+            const message = input.value.trim();
+            const userName = nameInput.value.trim() || 'User';
+
+            if (message === '') return;
+
+            const chatBox = document.getElementById('chat-box');
+
+            // Display user message
+            const userMessage = document.createElement('div');
+            userMessage.classList.add('message', 'user');
+            userMessage.textContent = `${userName}: ${message}`;
+            chatBox.appendChild(userMessage);
+
+            // Scroll to the bottom
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            // Clear input
+            input.value = '';
+
+            // Send message to server
+            fetch('/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message: message, name: userName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Display bot response
+                const botMessage = document.createElement('div');
+                botMessage.classList.add('message', 'bot');
+                botMessage.innerHTML = `AI: ${data.response}`;
+                chatBox.appendChild(botMessage);
+
+                // Scroll to the bottom
+                chatBox.scrollTop = chatBox.scrollHeight;
+            })
+            .catch(error => console.error('Error:', error));
+        }
+    </script>
+</body>
+</html>

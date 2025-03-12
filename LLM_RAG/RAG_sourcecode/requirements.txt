@@ -1,0 +1,11 @@
+Flask
+python-dotenv
+pandas
+python-docx
+PyMuPDF
+langchain-community
+langchain-openai
+rank-bm25
+numpy
+faiss-cpu; platform_system=="Linux" or platform_system=="Darwin"
+faiss-gpu; platform_system=="Linux" or platform_system=="Windows"
