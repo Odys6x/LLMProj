@@ -24,7 +24,7 @@ OPENAI_API_KEY=<addkey>
 
 Step 7 : Create .env file & include API KEY
 
-Step 8 :  change file path for static files 
+Step 8 :  change file path for static files in line 216 (directory = '/Users/nithiyapriyaramesh/Desktop/LLM_RAG/RAG_sourcecode/static/www.burpple.com')
 
 Step 9 : To Run The Flask Project
 python main.py
