@@ -24,13 +24,12 @@ OPENAI_API_KEY=<addkey>
 
 Step 7 : Create .env file & include API KEY
 
-Step 8 : To Run The Flask Project
+Step 8 :  change file path for static files 
+
+Step 9 : To Run The Flask Project
 python main.py
 
-Step 9 : Copy The Local Host Link And Paste It To The Browser For Example:
+Step 10 : Copy The Local Host Link And Paste It To The Browser For Example:
 http://127.0.0.1:5000
 
-Step 10:  change file path for static files 
-
 it might take a while to load
-![image](https://github.com/user-attachments/assets/eefede94-97c1-4bf2-a11b-ea1807990247)
