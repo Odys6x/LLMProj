@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // ✅ Replace with your actual Ngrok URL
-const LOCAL_STT_API = "https://66d0-116-15-163-188.ngrok-free.app/transcribe";
+const LOCAL_STT_API = "https://3d5d-116-15-163-188.ngrok-free.app/transcribe";
 
 export async function POST(req: NextRequest) {
   try {
