@@ -38,7 +38,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="/Users/nithiyapriyaramesh/Desktop/LLM_RAG/RAG_sourcecode/env"
+VIRTUAL_ENV="/Users/nithiyapriyaramesh/Desktop/LLMProj/env"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"
