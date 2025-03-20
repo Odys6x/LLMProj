@@ -1,75 +1,86 @@
+import openai
+from langchain.chat_models import ChatOpenAI
+from langchain.schema import SystemMessage, HumanMessage
+from langchain.memory import ConversationBufferMemory
+import os
 
-from app.llm_agent import FOLLOW_UP_QUESTIONS
+# Load API key from environment variables
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Store previous intent per user
-if "user_intent_history" not in globals():
-    user_intent_history = {}
-
-# Store chat history per user
-if "user_chat_history" not in globals():
-    user_chat_history = {}
-
-# Keywords that indicate a troubleshooting issue
-TROUBLESHOOTING_KEYWORDS = [
-    "slow", "disconnect", "not working", "buffering", "reboot", 
-    "no signal", "low speed", "unstable", "intermittent", "down"
-]
-
-# Keywords for installation & product guide requests
-INSTALLATION_KEYWORDS = [
-    "install", "setup", "configuration", "installation", "how to set up", 
-    "user guide", "manual", "instructions", "setup steps"
-]
-
-# Keywords for general router/WiFi inquiries (NOT an issue)
-GENERAL_WIFI_KEYWORDS = [
-    "StarHub", "SingTel", "router models", "specifications", "coverage", 
-    "compare routers", "best routers", "WiFi plans", "ISP"
-]
-
-# Keywords for billing and account-related inquiries
-BILLING_KEYWORDS = [
-    "bill", "billing", "payment", "invoice", "refund", 
-    "charges", "subscription", "credit", "overcharge", "discount", "plan upgrade"
-]
+# Store chat memory per user (shared between intent classifier & follow-up handler)
+user_chat_memory = {}
 
 class IntentClassifier:
+    def __init__(self, model_name="gpt-4"):
+        self.llm = ChatOpenAI(model_name=model_name)
+
     def classify(self, query, user_name):
-        """Classifies the intent as troubleshooting, installation/user guide, or general inquiry."""
-        query_lower = query.lower()
+        """Classifies user intent dynamically using LLM and stores it in shared memory."""
 
-        # 1️⃣ **Step 1: Check if this is a follow-up question (Keep the current intent)**
-        if user_name in user_intent_history:
-            if query_lower in {"what's next", "continue", "next step", "go on"}:
-                return user_intent_history[user_name]  # Keep the same intent
+        if user_name not in user_chat_memory:
+            user_chat_memory[user_name] = {
+                "memory": ConversationBufferMemory(memory_key="chat_history"),
+                "intent": None,  
+                "follow_up_count": 0,
+                "escalated": False  
+            }
 
-            # Stay in troubleshooting mode until all follow-up questions are answered
-            if user_name in user_chat_history and user_chat_history[user_name][-1].get("follow_up_count", 0) < len(FOLLOW_UP_QUESTIONS):
-                return "technical"  # Ensure troubleshooting continues
-            if user_name in user_chat_history and user_chat_history[user_name][-1].get("follow_up_count", 0) > len(FOLLOW_UP_QUESTIONS):
-                return "installation"  # Ensure troubleshooting continues
+        memory = user_chat_memory[user_name]["memory"]
 
-            # If all follow-ups are answered, reset intent for new questions
-            del user_intent_history[user_name]  # Allow a new intent to be detected
+        # **Check if the issue was already escalated**
+        if user_chat_memory[user_name]["escalated"]:
+            print(f"[DEBUG] Issue for {user_name} has already been escalated.")
+            return "escalation"
 
+        # **Manually Detect Escalation Phrases**
+        escalation_triggers = [
+            "it still doesn’t work", "issue persists", "not fixed", 
+            "not working", "call IT", "contact support", "need more help", "escalate this"
+        ]
+        if any(trigger in query.lower() for trigger in escalation_triggers):
+            print(f"[DEBUG] Escalation triggered by user input: {query}")
+            user_chat_memory[user_name]["escalated"] = True
+            return "escalation"
 
-        # 2️⃣ **Step 2: Detect keywords to classify the issue type (PRIORITY)**
-        if any(keyword in query_lower for keyword in INSTALLATION_KEYWORDS):
-            user_intent_history[user_name] = "installation"
-            return "installation"
+        # **Use LLM for Intent Classification**
+        system_prompt = (
+            "You are an intelligent intent classifier for a chatbot handling WiFi, "
+            "network, and billing inquiries. Classify the user's query into one of "
+            "the following intents:\n"
+            "1. 'technical' - If the user is troubleshooting WiFi or network issues.\n"
+            "2. 'installation' - If the user is asking for setup or configuration steps.\n"
+            "3. 'general' - If the user has a general query about WiFi or ISPs.\n"
+            "4. 'billing' - If the user is asking about bills, invoices, or subscriptions.\n"
+            "5. 'escalation' - If the user says 'it still doesn’t work', 'issue persists', "
+            "or requests IT support, escalate the issue.\n"
+            "Return only the intent as output."
+        )
 
-        if any(keyword in query_lower for keyword in TROUBLESHOOTING_KEYWORDS):
-            user_intent_history[user_name] = "technical"
-            return "technical"
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"User Query: {query}")
+        ]
 
-        if any(keyword in query_lower for keyword in GENERAL_WIFI_KEYWORDS):
-            user_intent_history[user_name] = "general"
-            return "general"
+        response = self.llm.invoke(messages).content.strip().lower()
+
+        # **Ensure "escalation" intent is prioritized**
+        if response == "escalation":
+            user_chat_memory[user_name]["escalated"] = True
+            return "escalation"
+
+        # Store classified intent in shared memory
+        user_chat_memory[user_name]["intent"] = response
+        print(f"Detected intent for {user_name}: {response}")
+
+        # Save query in memory so follow-ups have full context
+        memory.save_context({"user": query}, {"bot": f"[Intent: {response}]"})
+
         
-        if any(keyword in query_lower for keyword in BILLING_KEYWORDS):
-            user_intent_history[user_name] = "billing"
-            return "billing"
+        return response
+    
+    def reset_escalation(self, user_name):
+        """Resets the escalation flag so future queries are handled normally."""
+        if user_name in user_chat_memory:
+            user_chat_memory[user_name]["escalated"] = False
+            print(f"[DEBUG] Escalation flag reset for {user_name}.")
 
-        # 3️⃣ **Step 3: If no specific keyword is found, reset to general**
-        user_intent_history[user_name] = "general"
-        return "general"

@@ -1,160 +1,147 @@
-# import asyncio
-# from langchain_openai.chat_models import ChatOpenAI
-# from app.config import Config
-
-# # Initialize the LLM
-# general_llm = ChatOpenAI(openai_api_key=Config.OPENAI_API_KEY, model="gpt-4o")
-
-# # Store chat history per user
-# user_chat_history = {}
-
-# # Follow-up questions in sequence
-# FOLLOW_UP_QUESTIONS = [
-#     "Are you experiencing this issue on all devices or just one?",
-#     "Is it slow all the time or only at specific hours?",
-#     "Have you tried rebooting your router?",
-#     "Does the issue happen on both WiFi and wired connections?",
-#     "Do you notice speed drops in a specific location at home?"
-# ]
-
-# async def general_llm_response(question, user_name):
-#     """Handles general queries and asks follow-up questions before sending to RAG."""
-
-#     if user_name not in user_chat_history:
-#         user_chat_history[user_name] = []
-
-#     # Append user query to history
-#     user_chat_history[user_name].append({"user": question})
-
-#     # If enough questions were asked, escalate to RAG
-#     if len(user_chat_history[user_name]) >= len(FOLLOW_UP_QUESTIONS):
-#         print(f"Collected enough details from {user_name}, forwarding to RAG...")
-#         return await escalate_to_rag(user_name)
-    
-#     # Get the next follow-up question
-#     next_question_index = len(user_chat_history[user_name]) - 1
-#     next_question = FOLLOW_UP_QUESTIONS[next_question_index]
-
-#     # Strictly enforce that the LLM only asks a single follow-up question
-#     return next_question  # This prevents LLM from over-explaining
-
-# async def escalate_to_rag(user_name):
-#     """Sends the collected chat history to RAG with a structured troubleshooting prompt."""
-#     from app.chat import custom_chain as rag_response  # Import inside to avoid circular dependency
-
-#     # Retrieve full chat history
-#     history_text = "\n".join(
-#         f"User: {entry.get('user', '[System]')}\nBot: {entry.get('bot', '')}" 
-#         for entry in user_chat_history[user_name]
-#     )
-
-#     # Create a structured troubleshooting prompt for RAG
-#     troubleshooting_prompt = f"""
-#     The user {user_name} has been experiencing an issue with their WiFi. Below is the conversation history:
-    
-#     {history_text}
-    
-#     Based on this troubleshooting information, analyze the issue and provide a helpful solution.
-#     DO NOT rephrase the conversation or summarize it. Instead, diagnose the issue and suggest concrete troubleshooting steps.
-#     """
-
-#     # Send the structured troubleshooting prompt to RAG
-#     final_response = await rag_response(troubleshooting_prompt, user_name)
-
-#     # Clear history after escalation
-#     del user_chat_history[user_name]
-
-#     return final_response
-
 import asyncio
 import re
-from langchain_openai.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
+from langchain.memory import ConversationBufferMemory
 from app.config import Config
 
-# Initialize the LLM
-general_llm = ChatOpenAI(openai_api_key=Config.OPENAI_API_KEY, model="gpt-4o-mini")
+# Initialize the LLM agent
+llm = ChatOpenAI(openai_api_key=Config.OPENAI_API_KEY, model="gpt-4o-mini")
+user_chat_memory = {}
+user_language = {}  # Store detected language per user
 
-# Store chat history per user
-user_chat_history = {}
-user_language = {}
-user_intent_history = {}
+# Common greetings in multiple languages
+GREETINGS = ["hi", "hello", "hey", "hola", "bonjour", "你好", "こんにちは", "안녕하세요", "hallo", "ciao", "வணக்கம்"]
 
+async def detect_language(question):
+    """Detects the user's language dynamically."""
+    system_prompt = "Detect the language of the following message and reply ONLY with the language code (e.g., en, es, fr, zh, ta)."
 
-# Follow-up questions in sequence
-FOLLOW_UP_QUESTIONS = [
-    "Are you experiencing this issue on all devices or just one?",
-    "Is it slow all the time or only at specific hours?",
-    "Have you tried rebooting your router?",
-    "Does the issue happen on both WiFi and wired connections?",
-    "Do you notice speed drops in a specific location at home?"
-]
+    response = await llm.ainvoke([
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": question}
+    ])
 
-# Define vague responses that require clarification
-UNCLEAR_RESPONSES = {"just", "idk", "maybe", "not sure"}
-def is_nonsense(text):
-    """Detects gibberish text based on randomness, missing vowels, or excessive consonants."""
-    text = text.lower().strip()
-    if len(text) < 3 or re.match(r"^[^a-zA-Z]+$", text) or re.match(r"^([a-zA-Z])\1{2,}$", text):
-        return True
-    if not re.search(r"[aeiouy]", text) or re.search(r"[bcdfghjklmnpqrstvwxyz]{6,}", text, re.I):
-        return True
-    return False
+    detected_lang = response.content.strip().lower()
+    return detected_lang if detected_lang else "en"  # Default to English
 
-async def general_llm_response(question, user_name):
-    """Handles general queries and ensures all follow-up questions are answered before processing."""
+async def translate_text(text, target_lang):
+    """Translates text dynamically into the detected user language."""
+    if target_lang == "en":  # If English, no need to translate
+        return text
 
-    if user_name not in user_chat_history:
-        user_chat_history[user_name] = {"history": [], "follow_up_count": 0}
-
-    # Define common greetings
-    GREETINGS = {"hi", "hello", "hey", "good morning", "good afternoon", "good evening", "hola", "yo"}
-    if question.lower().strip() in GREETINGS:
-        return "Hello! How can I assist you today?"
-
-    # Handle gibberish input
-    if is_nonsense(question):
-        return "I didn't quite understand that. Could you rephrase your response?"
-
-    # Retrieve follow-up progress
-    follow_up_count = user_chat_history[user_name]["follow_up_count"]
-
-    # Ensure follow-up sequence completes before switching
-    if follow_up_count < len(FOLLOW_UP_QUESTIONS):
-        next_question = FOLLOW_UP_QUESTIONS[follow_up_count]
-        user_chat_history[user_name]["history"].append({"user": question, "bot": next_question})
-        user_chat_history[user_name]["follow_up_count"] += 1  # Move to next question
-        return next_question  # Continue follow-ups
-
-    # **All follow-up questions completed, now escalate to RAG**
-    print(f"[DEBUG] All follow-up questions answered by {user_name}. Forwarding to RAG...")
-
-    # Construct full conversation history
-    collected_answers = "\n".join(
-        f"User: {entry['user']}\nBot: {entry['bot']}" for entry in user_chat_history[user_name]["history"]
-    )
-
-    # Call RAG or troubleshooting function with full collected answers
-    user_intent_history[user_name] = "installation"  # Set intent for RAG
-    return await escalate_to_rag(user_name, collected_answers)
-
-async def escalate_to_rag(user_name, collected_answers):
-    """Sends the collected chat history to RAG with a structured troubleshooting prompt."""
-    from app.chat import custom_chain as rag_response  # Import inside to avoid circular dependency
-
-    # Create a structured troubleshooting prompt for RAG
-    troubleshooting_prompt = f"""
-    The user {user_name} has been experiencing an issue with their WiFi. Below is the conversation history:
+    system_prompt = f"""
+    Translate the following into {target_lang}, but DO NOT add any extra information, disclaimers, or metadata.
+    ONLY return the translation of the given text, nothing else.
     
-    {collected_answers}
-    
-    Based on this troubleshooting information, analyze the issue and provide a helpful solution.
-    DO NOT rephrase the conversation or summarize it. Instead, diagnose the issue and suggest concrete troubleshooting steps.
+    Text: "{text}"
     """
 
-    # Send the structured troubleshooting prompt to RAG
+    response = await llm.ainvoke([
+        {"role": "system", "content": system_prompt}
+    ])
+
+    return response.content.strip()
+
+async def dynamic_llm_response(question, user_name):
+    """Handles queries, detects language, translates responses, and dynamically generates follow-up questions."""
+
+    # **Detect user's language if not already stored OR if they switch languages**
+    detected_lang = await detect_language(question)
+    previous_lang = user_language.get(user_name, None)
+    
+    if previous_lang is None or detected_lang != previous_lang:
+        user_language[user_name] = detected_lang  # Store language preference
+
+    # **Handle greetings and respond in the detected language**
+    if question.lower().strip() in GREETINGS:
+        greeting_response = await translate_text("Hello! How can I assist you today?", detected_lang)
+        return greeting_response
+
+    # **Ensure user has a memory instance**
+    if user_name not in user_chat_memory:
+        user_chat_memory[user_name] = {
+            "memory": ConversationBufferMemory(memory_key="chat_history"),
+            "intent": None,
+            "follow_up_count": 0
+        }
+
+    memory = user_chat_memory[user_name]["memory"]
+    follow_up_count = user_chat_memory[user_name]["follow_up_count"]
+    user_intent = user_chat_memory[user_name]["intent"]
+
+    # **Store user query in memory**
+    memory.save_context({"user": question}, {"bot": ""})
+
+    # **Check if follow-up question limit is reached**
+    if follow_up_count >= 5:
+        print(f"[DEBUG] Maximum follow-ups reached for {user_name}. Escalating to RAG...")
+        collected_answers = memory.load_memory_variables({})["chat_history"]
+        return await escalate_to_rag(user_name, collected_answers)
+
+    # **Construct dynamic troubleshooting prompt**
+    prompt = f"""
+    You are a helpful AI assistant specializing in WiFi troubleshooting and customer inquiries.
+    The user {user_name} is experiencing an issue classified as **{user_intent}**.
+    Here is their conversation history:
+
+    {memory.load_memory_variables({})["chat_history"]}
+
+    Based on this, do the following:
+    - If more information is needed, ask a **specific follow-up question** to clarify the problem.
+    - **You can ask up to 5 questions maximum** before giving a solution.
+    - If the limit is reached, respond with: 'escalate_to_rag'
+    - If enough details are collected, provide a **direct troubleshooting solution**.
+    
+    **Translate your response into {detected_lang}.**
+    
+    ONLY return the next response, **do not summarize** previous messages.
+    """
+
+    # **Call LLM to generate a response**
+    response = await llm.ainvoke(prompt)
+    translated_response = response.content.strip()
+
+    # **Manually check for escalation trigger**
+    if "escalate_to_rag" in translated_response.lower():
+        print(f"[DEBUG] Escalation trigger detected for {user_name}.")
+        collected_answers = memory.load_memory_variables({})["chat_history"]
+        return await escalate_to_rag(user_name, collected_answers)
+
+    # **Store AI's response in memory and update follow-up count**
+    memory.save_context({"user": question}, {"bot": translated_response})
+    user_chat_memory[user_name]["follow_up_count"] += 1  # Increment follow-up count
+
+    return translated_response
+
+async def escalate_to_rag(user_name, collected_answers):
+    """Sends the collected chat history to RAG with a structured troubleshooting prompt in the user's language."""
+    from app.chat import custom_chain as rag_response  # Avoid circular dependency
+
+    user_lang = user_language.get(user_name, "en")
+
+    # **Retrieve full chat history**
+    memory_data = user_chat_memory[user_name]["memory"].load_memory_variables({})
+    chat_history = memory_data.get("chat_history", "")
+
+    history_text = "\n".join(chat_history.split("\n"))  # Ensure it's properly formatted
+
+
+    troubleshooting_prompt = f"""
+    The user {user_name} has been experiencing an issue with their WiFi. Below is the conversation history:
+
+    {history_text}
+
+    Based on this troubleshooting information, analyze the issue and provide a helpful solution.
+    DO NOT rephrase the conversation or summarize it. Instead, diagnose the issue and suggest concrete troubleshooting steps.
+    
+    **Translate your response into {user_lang}.**
+    """
+
+    # **Send structured prompt to RAG**
     final_response = await rag_response(troubleshooting_prompt, user_name)
 
-    # Clear history after escalation
-    user_chat_history[user_name] = {"history": [], "follow_up_count": 0}  # Reset for next query
+    # **Clear memory after escalation**
+    del user_chat_memory[user_name]
+    del user_language[user_name]
 
     return final_response

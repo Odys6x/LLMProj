@@ -146,6 +146,7 @@ async def custom_chain(question, user_name):
     - If the user is asking for the next step, summarize only the next 2-3 actions without repeating previous steps.
     - Respond naturally in a conversational tone, ensuring readability for a voice assistant.
     - If it’s a new topic, reset the context accordingly but provide a direct and structured answer.
+]
     """
     print("[DEBUG] Sending prompt to LLM")
 
