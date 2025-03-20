@@ -1,3 +1,4 @@
+from app.vectorstore import load_faiss
 from flask import Flask, render_template, request, jsonify
 import os
 import re
@@ -188,19 +189,19 @@ def batch_documents(documents, batch_size):
         yield documents[i:i + batch_size]
 
 
-# Save FAISS vector store to file
-def save_faiss(vectorstore, index_file, doc_file): #vectorstore, which is the FAISS vector store object; index_file, the filename where the index should be saved; and doc_file, the filename where the document store should be saved
-    vectorstore.save_local(index_file)
-    with open(doc_file, 'wb') as f:
-        pickle.dump(vectorstore.docstore, f) #Uses the pickle module to serialize and save the document store part of the vectorstore (stored in vectorstore.docstore) to the file
+# Ensure FAISS is loaded only once globally
+index_file = 'faiss_index'
+doc_file = 'index.pkl'
 
-
-# Load FAISS vector store from file
-def load_faiss(index_file, doc_file, embeddings):
-    vectorstore = FAISS.load_local(index_file, embeddings, allow_dangerous_deserialization=True)
-    with open(doc_file, 'rb') as f:
-        vectorstore.docstore = pickle.load(f)
-    return vectorstore
+if "vectorstore" not in globals() or vectorstore is None:
+    print("Initializing FAISS vector store...")
+    
+    vectorstore = load_faiss(index_file, doc_file, embeddings)
+    
+    if vectorstore:
+        print("Loaded existing FAISS vector store.")
+    else:
+        print("No existing FAISS vector store found.")
 
 
 # Function to integrate chat history into the vector database
@@ -228,6 +229,8 @@ else:
     index_file = 'faiss_index'
     doc_file = 'index.pkl'
     if os.path.exists(index_file) and os.path.exists(doc_file):
+        if vectorstore is None:
+            vectorstore = load_faiss(index_file, doc_file, embeddings)
         vectorstore = load_faiss(index_file, doc_file, embeddings)
         vectorstores.append(vectorstore)
         print("Loaded existing FAISS vector store.")
